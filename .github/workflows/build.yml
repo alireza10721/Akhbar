@@ -27,15 +27,16 @@ jobs:
             mkdir -p _project
             unzip -oq "$ZIP" -d _project
 
-            if [[ ! -f _project/settings.gradle.kts && ! -f _project/settings.gradle ]]; then
-              SETTINGS="$(find _project -mindepth 2 -type f \( -name settings.gradle.kts -o -name settings.gradle \) | head -n 1 || true)"
-
-              if [[ -n "$SETTINGS" ]]; then
-                PROJECT_DIR="$(dirname "$SETTINGS")"
-                cp -a "$PROJECT_DIR"/. .
-              fi
-            else
+            if [[ -f _project/settings.gradle.kts || -f _project/settings.gradle ]]; then
               cp -a _project/. .
+            else
+              SETTINGS="$(find _project -mindepth 2 -type f \( -name settings.gradle.kts -o -name settings.gradle \) | head -n 1 || true)"
+              if [[ -z "$SETTINGS" ]]; then
+                echo "Could not find settings.gradle or settings.gradle.kts inside ZIP"
+                exit 1
+              fi
+              PROJECT_DIR="$(dirname "$SETTINGS")"
+              cp -a "$PROJECT_DIR"/. .
             fi
           fi
 
@@ -53,8 +54,19 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure preinstalled Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$SDKMANAGER" ]]; then
+            echo "sdkmanager not found in $SDK/cmdline-tools"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build APK
         run: gradle assembleDebug --no-daemon --stacktrace
