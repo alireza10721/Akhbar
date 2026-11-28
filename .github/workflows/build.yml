@@ -1,10 +1,9 @@
+
 name: Build JahanNews APK
 
-"on":
+on:
   push:
-    paths:
-      - 'JahanNews_GitHub_Upload_LOGO.zip'
-      - '.github/workflows/build.yml'
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -13,68 +12,56 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify project ZIP
+      - name: Extract project ZIP if present
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="JahanNews_GitHub_Upload_LOGO.zip"
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "::error::Missing $ZIP_FILE in repository root."
-            ls -la
-            exit 1
+          ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | sort | head -n 1 || true)"
+
+          if [[ -n "$ZIP" ]]; then
+            mkdir -p _project
+            unzip -oq "$ZIP" -d _project
+
+            if [[ ! -f _project/settings.gradle.kts && ! -f _project/settings.gradle ]]; then
+              SETTINGS="$(find _project -mindepth 2 -type f \( -name settings.gradle.kts -o -name settings.gradle \) | head -n 1 || true)"
+
+              if [[ -n "$SETTINGS" ]]; then
+                PROJECT_DIR="$(dirname "$SETTINGS")"
+                cp -a "$PROJECT_DIR"/. .
+              fi
+            else
+              cp -a _project/. .
+            fi
           fi
-          unzip -t "$ZIP_FILE"
 
-      - name: Extract Android project
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/jahannews
-          unzip -q JahanNews_GitHub_Upload_LOGO.zip -d /tmp/jahannews
-          test -f /tmp/jahannews/settings.gradle.kts
-          test -f /tmp/jahannews/app/build.gradle.kts
-          test -f /tmp/jahannews/app/src/main/AndroidManifest.xml
-          cp -R /tmp/jahannews/. .
+          test -f settings.gradle.kts -o -f settings.gradle
+          test -f app/build.gradle.kts -o -f app/build.gradle
 
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager was not found in $ANDROID_HOME/cmdline-tools"
-            find "$ANDROID_HOME" -maxdepth 4 -type f -name sdkmanager 2>/dev/null || true
-            exit 1
-          fi
-          echo "Using SDK manager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
-        run: gradle --no-daemon clean assembleDebug
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Upload APK artifact
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: JahanNews-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: JahanNews-v1.5-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
